@@ -9,7 +9,7 @@
         body { margin: 0; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; height: 100vh; }
         #panel-sql { padding: 12px; background: #1e293b; color: white; display: flex; flex-direction: column; gap: 8px; z-index: 1000; }
         .controles { display: flex; gap: 10px; align-items: center; }
-        textarea { flex-grow: 1; height: 55px; font-family: monospace; font-size: 14px; padding: 8px; border-radius: 4px; border: none; }
+        textarea { flex-grow: 1; height: 75px; font-family: monospace; font-size: 13px; padding: 8px; border-radius: 4px; border: none; }
         button { padding: 10px 18px; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
         button:hover { background: #059669; }
         .btn-ejemplo { background: #3b82f6; padding: 5px 10px; font-size: 12px; }
@@ -21,23 +21,40 @@
 <body>
 
     <div id="panel-sql">
-        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-            <span style="font-size: 13px;">Consultas rápidas:</span>
-            <button class="btn-ejemplo" onclick="cargarEjemplo('SELECT id, nombre, poblacion, geom FROM public.barrios_tunja;')">Barrios Tunja</button>
-            <button class="btn-ejemplo" onclick="cargarEjemplo('SELECT id_registro, valor_db, direccion, geom FROM public.ruido_ordinario_diurno;')">Ruido Ordinario Diurno</button>
-            <button class="btn-ejemplo" onclick="cargarEjemplo('SELECT id_registro, valor_db, direccion, geom FROM public.ruido_dominical_nocturno WHERE valor_db > 60;')">Ruido Dominical > 60 dB</button>
+        <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+            <span style="font-size: 13px; font-weight: bold;">Consultas rápidas:</span>
+            <button class="btn-ejemplo" onclick="seleccionarConsulta(1)">1. Top 60 Ordinario Diurno</button>
+            <button class="btn-ejemplo" onclick="seleccionarConsulta(2)">2. Barrios por Sector</button>
+            <button class="btn-ejemplo" onclick="seleccionarConsulta(3)">3. Top 20 Más Ruidosos</button>
+            <button class="btn-ejemplo" onclick="seleccionarConsulta(4)">4. Top 20 Menos Ruidosos</button>
+            <button class="btn-ejemplo" onclick="seleccionarConsulta(5)">5. Barrios Sin Registro</button>
+            <button class="btn-ejemplo" onclick="seleccionarConsulta(6)">6. Equipamientos > 65 dB</button>
+            <button class="btn-ejemplo" onclick="seleccionarConsulta(7)">7. Buffer Educativo/Salud</button>
+            <button class="btn-ejemplo" onclick="seleccionarConsulta(8)">8. Común 4 Mediciones > 65</button>
+            <button class="btn-ejemplo" onclick="seleccionarConsulta(9)">9. Común 4 Mediciones < 55</button>
         </div>
         <div class="controles">
-            <textarea id="sql-input">SELECT id, nombre, poblacion, geom FROM public.barrios_tunja;</textarea>
+            <textarea id="sql-input">SELECT punto_medicion.id_punto, punto_medicion.direccion, registro_ruido.valor_db, punto_medicion.geom FROM punto_medicion, registro_ruido, configuracion_escenario WHERE punto_medicion.id_punto = registro_ruido.id_punto AND registro_ruido.id_escenario = configuracion_escenario.id_escenario AND configuracion_escenario.metodo_registro ILIKE '%MEDICIÓN%' AND configuracion_escenario.jornada ILIKE '%DIURNO%' AND configuracion_escenario.tipo_dia ILIKE '%ORDINARIO%' ORDER BY registro_ruido.valor_db DESC LIMIT 60;</textarea>
             <button onclick="ejecutarConsulta()">Ejecutar SQL</button>
         </div>
         <span id="error-msg"></span>
     </div>
 
     <div id="map"></div>
-
     <script src="/static/leaflet.js"></script>
     <script>
+        var CONSULTAS = {
+            1: "SELECT punto_medicion.id_punto, punto_medicion.direccion, registro_ruido.valor_db, punto_medicion.geom FROM punto_medicion, registro_ruido, configuracion_escenario WHERE punto_medicion.id_punto = registro_ruido.id_punto AND registro_ruido.id_escenario = configuracion_escenario.id_escenario AND configuracion_escenario.metodo_registro ILIKE '%MEDICIÓN%' AND configuracion_escenario.jornada ILIKE '%DIURNO%' AND configuracion_escenario.tipo_dia ILIKE '%ORDINARIO%' ORDER BY registro_ruido.valor_db DESC LIMIT 60;",
+            2: "SELECT barrios_tunja.sector, COUNT(barrios_tunja.id) AS cantidad_barrios, (SELECT COUNT(punto_medicion.id_punto) FROM punto_medicion WHERE ST_Within(punto_medicion.geom, ST_Union(barrios_tunja.geom))) AS cantidad_puntos_medicion, ST_Union(barrios_tunja.geom) AS geom FROM barrios_tunja GROUP BY barrios_tunja.sector ORDER BY cantidad_puntos_medicion DESC;",
+            3: "SELECT barrios_tunja.id, barrios_tunja.nombre AS barrio, barrios_tunja.sector, barrios_tunja.poblacion, COUNT(ruido_ordinario_diurno.id_punto) AS cantidad_puntos, ROUND(AVG(ruido_ordinario_diurno.valor_db)::numeric, 1) AS promedio_db, MAX(ruido_ordinario_diurno.valor_db) AS maximo_db, barrios_tunja.geom FROM barrios_tunja, ruido_ordinario_diurno WHERE ST_Within(ruido_ordinario_diurno.geom, barrios_tunja.geom) GROUP BY barrios_tunja.id, barrios_tunja.nombre, barrios_tunja.sector, barrios_tunja.poblacion, barrios_tunja.geom ORDER BY promedio_db DESC LIMIT 20;",
+            4: "SELECT barrios_tunja.id, barrios_tunja.nombre AS barrio, barrios_tunja.sector, barrios_tunja.poblacion, COUNT(ruido_ordinario_diurno.id_punto) AS cantidad_puntos, ROUND(AVG(ruido_ordinario_diurno.valor_db)::numeric, 1) AS promedio_db, MIN(ruido_ordinario_diurno.valor_db) AS minimo_db, barrios_tunja.geom FROM barrios_tunja, ruido_ordinario_diurno WHERE ST_Within(ruido_ordinario_diurno.geom, barrios_tunja.geom) GROUP BY barrios_tunja.id, barrios_tunja.nombre, barrios_tunja.sector, barrios_tunja.poblacion, barrios_tunja.geom ORDER BY promedio_db ASC LIMIT 20;",
+            5: "SELECT barrios_tunja.id, barrios_tunja.nombre AS barrio, barrios_tunja.sector, barrios_tunja.poblacion, barrios_tunja.viviendas, barrios_tunja.geom FROM barrios_tunja WHERE NOT EXISTS (SELECT 1 FROM punto_medicion WHERE ST_Within(punto_medicion.geom, barrios_tunja.geom)) ORDER BY barrios_tunja.nombre ASC;",
+            6: "SELECT equipamientos_tunja.id, equipamientos_tunja.equipamien AS tipo, COALESCE(equipamientos_tunja.equip, equipamientos_tunja.observa, 'Sin nombre') AS nombre, ruido_ordinario_diurno.valor_db AS db, ruido_ordinario_diurno.direccion AS direccion, ROUND(ST_Distance(equipamientos_tunja.geom::geography, ruido_ordinario_diurno.geom::geography)::numeric, 1) AS distancia, equipamientos_tunja.geom FROM equipamientos_tunja, ruido_ordinario_diurno WHERE ST_DWithin(equipamientos_tunja.geom::geography, ruido_ordinario_diurno.geom::geography, 50) AND ruido_ordinario_diurno.valor_db > 65 ORDER BY ruido_ordinario_diurno.valor_db DESC, distancia ASC;",
+            7: "SELECT ST_Buffer(top_puntos.geom::geography, 50)::geometry AS geom, barrios_tunja.nombre AS nombre_barrio, top_puntos.id_punto, top_puntos.valor_db, top_puntos.direccion AS direccion_punto, equipamientos_tunja.equipamien AS tipo_equipamiento, COALESCE(equipamientos_tunja.equip, equipamientos_tunja.observa, 'Sin nombre') AS nombre_equipamiento FROM (SELECT ruido_ordinario_diurno.id_punto, ruido_ordinario_diurno.valor_db, ruido_ordinario_diurno.direccion, ruido_ordinario_diurno.geom FROM ruido_ordinario_diurno ORDER BY ruido_ordinario_diurno.valor_db DESC LIMIT 20) AS top_puntos, equipamientos_tunja, barrios_tunja WHERE ST_Intersects(ST_Buffer(top_puntos.geom::geography, 50)::geometry, equipamientos_tunja.geom) AND ST_Intersects(equipamientos_tunja.geom, barrios_tunja.geom) AND (equipamientos_tunja.equipamien ILIKE '%Educativo%' OR equipamientos_tunja.equipamien ILIKE '%Salud%') ORDER BY top_puntos.valor_db DESC;",
+            8: "SELECT ruido_ordinario_diurno.geom AS geom, ruido_ordinario_diurno.id_punto, ruido_ordinario_diurno.direccion, ruido_ordinario_diurno.valor_db AS db_ord_diurno, ruido_ordinario_nocturno.valor_db AS db_ord_nocturno, ruido_dominical_diurno.valor_db AS db_dom_diurno, ruido_dominical_nocturno.valor_db AS db_dom_nocturno FROM ruido_ordinario_diurno, ruido_ordinario_nocturno, ruido_dominical_diurno, ruido_dominical_nocturno WHERE ST_Equals(ruido_ordinario_diurno.geom, ruido_ordinario_nocturno.geom) AND ST_Equals(ruido_ordinario_diurno.geom, ruido_dominical_diurno.geom) AND ST_Equals(ruido_ordinario_diurno.geom, ruido_dominical_nocturno.geom) AND ruido_ordinario_diurno.valor_db > 65 AND ruido_ordinario_nocturno.valor_db > 65 AND ruido_dominical_diurno.valor_db > 65 AND ruido_dominical_nocturno.valor_db > 65 ORDER BY ruido_ordinario_diurno.valor_db DESC;",
+            9: "SELECT ruido_ordinario_diurno.geom AS geom, ruido_ordinario_diurno.id_punto, ruido_ordinario_diurno.direccion, ruido_ordinario_diurno.valor_db AS db_ord_diurno, ruido_ordinario_nocturno.valor_db AS db_ord_nocturno, ruido_dominical_diurno.valor_db AS db_dom_diurno, ruido_dominical_nocturno.valor_db AS db_dom_nocturno FROM ruido_ordinario_diurno, ruido_ordinario_nocturno, ruido_dominical_diurno, ruido_dominical_nocturno WHERE ST_Equals(ruido_ordinario_diurno.geom, ruido_ordinario_nocturno.geom) AND ST_Equals(ruido_ordinario_diurno.geom, ruido_dominical_diurno.geom) AND ST_Equals(ruido_ordinario_diurno.geom, ruido_dominical_nocturno.geom) AND ruido_ordinario_diurno.valor_db < 55 AND ruido_ordinario_nocturno.valor_db < 55 AND ruido_dominical_diurno.valor_db < 55 AND ruido_dominical_nocturno.valor_db < 55 ORDER BY ruido_ordinario_diurno.valor_db DESC;"
+        };
+
         var map = L.map('map').setView([5.5353, -73.3678], 13);
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -46,9 +63,26 @@
 
         window.miCapaGeoJSON = null;
 
-        function cargarEjemplo(query) {
-            document.getElementById('sql-input').value = query;
+        function seleccionarConsulta(numero) {
+            document.getElementById('sql-input').value = CONSULTAS[numero];
             ejecutarConsulta();
+        }
+
+        function extraerDecibeles(props) {
+            if (!props) return null;
+            if (props.valor_db !== undefined) return props.valor_db;
+            if (props.promedio_db !== undefined) return props.promedio_db;
+            if (props.db !== undefined) return props.db;
+            if (props.db_ord_diurno !== undefined) return props.db_ord_diurno;
+            return null;
+        }
+
+        function obtenerColorRuido(db) {
+            if (db === null || db === undefined) return "#2563eb";
+            if (db >= 70) return "#dc2626";
+            if (db >= 65) return "#f97316";
+            if (db >= 55) return "#eab308";
+            return "#16a34a";
         }
 
         async function ejecutarConsulta() {
@@ -76,19 +110,9 @@
                     map.removeLayer(window.miCapaGeoJSON);
                 }
 
-                                // Función auxiliar para colorear según el valor en decibeles (si existe)
-                function obtenerColorRuido(db) {
-                    if (!db) return "#2563eb";
-                    if (db >= 70) return "#dc2626"; // Rojo: Muy alto (>= 70 dB)
-                    if (db >= 65) return "#f97316"; // Naranja: Alto (65 - 69.9 dB)
-                    if (db >= 55) return "#eab308"; // Amarillo: Moderado (55 - 64.9 dB)
-                    return "#16a34a";               // Verde: Bajo (< 55 dB)
-                }
-
                 window.miCapaGeoJSON = L.geoJSON(datos, {
-                    // Convierte los puntos en círculos de colores (elimina el ícono roto)
                     pointToLayer: function (feature, latlng) {
-                        var db = feature.properties ? feature.properties.valor_db : null;
+                        var db = extraerDecibeles(feature.properties);
                         return L.circleMarker(latlng, {
                             radius: 7,
                             fillColor: obtenerColorRuido(db),
@@ -98,9 +122,15 @@
                             fillOpacity: 0.85
                         });
                     },
-                    // Estilo para polígonos (como barrios_tunja)
-                    style: function () {
-                        return { color: "#2563eb", weight: 2, fillOpacity: 0.3 };
+                    style: function (feature) {
+                        var db = extraerDecibeles(feature.properties);
+                        var colorPoligono = obtenerColorRuido(db);
+                        return { 
+                            color: colorPoligono, 
+                            fillColor: colorPoligono,
+                            weight: 2, 
+                            fillOpacity: 0.45 
+                        };
                     },
                     onEachFeature: function (feature, layer) {
                         if (feature.properties) {
@@ -112,7 +142,6 @@
                         }
                     }
                 }).addTo(map);
-
 
                 if (datos.features && datos.features.length > 0) {
                     map.fitBounds(window.miCapaGeoJSON.getBounds());
